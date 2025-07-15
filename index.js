@@ -249,6 +249,68 @@ app.get('/api/categories', (req, res) => {
   }
 });
 
+// Get all sub-categories with course counts
+app.get('/api/sub-categories', (req, res) => {
+  try {
+    const { category = '' } = req.query;
+    
+    let coursesToAnalyze = courses;
+    
+    // If category is specified, only get sub_categories for that category
+    if (category) {
+      coursesToAnalyze = courses.filter(course => 
+        course.category?.toLowerCase() === category.toLowerCase() ||
+        course.category?.toLowerCase().includes(category.toLowerCase())
+      );
+    }
+    
+    const subCategories = [...new Set(coursesToAnalyze.map(course => course.sub_category).filter(Boolean))];
+    const subCategoriesWithCount = subCategories.map(subCategory => ({
+      name: subCategory,
+      category: category || 'all',
+      course_count: coursesToAnalyze.filter(c => c.sub_category === subCategory).length
+    }));
+
+    res.json(subCategoriesWithCount);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+// Get price range statistics
+app.get('/api/price-range', (req, res) => {
+  try {
+    const prices = courses.map(course => course.discount_price || course.price || 0).filter(price => price > 0);
+    
+    if (prices.length === 0) {
+      return res.json({ min: 0, max: 0, average: 0 });
+    }
+    
+    const priceStats = {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+      average: Math.round(prices.reduce((sum, price) => sum + price, 0) / prices.length),
+      ranges: {
+        free: courses.filter(c => (c.discount_price || c.price || 0) === 0).length,
+        under_500k: courses.filter(c => (c.discount_price || c.price || 0) < 500000 && (c.discount_price || c.price || 0) > 0).length,
+        '500k_1m': courses.filter(c => {
+          const price = c.discount_price || c.price || 0;
+          return price >= 500000 && price < 1000000;
+        }).length,
+        '1m_2m': courses.filter(c => {
+          const price = c.discount_price || c.price || 0;
+          return price >= 1000000 && price < 2000000;
+        }).length,
+        over_2m: courses.filter(c => (c.discount_price || c.price || 0) >= 2000000).length
+      }
+    };
+
+    res.json(priceStats);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
 // Get statistics
 app.get('/api/stats', (req, res) => {
   try {
@@ -288,6 +350,142 @@ app.get('/api/health', (req, res) => {
 // 404 handler
 app.use('/api/*', (req, res) => {
   res.status(404).json({ error: 'API endpoint not found' });
+});
+
+// Advanced filter endpoint with price range, name, category, and sub_category
+app.get('/api/filter', (req, res) => {
+  try {
+    const { 
+      q = '',               // Search by name/title
+      category = '',        // Filter by category
+      sub_category = '',    // Filter by sub_category
+      min_price = 0,        // Minimum price
+      max_price = 999999999,// Maximum price
+      level = '',           // Filter by level
+      page = 1,             // Pagination
+      limit = 12,           // Items per page
+      sort = 'title',       // Sort by
+      instructor_id = ''    // Filter by instructor
+    } = req.query;
+
+    let filtered = courses.filter(course => {
+      // Search by title, description, or any text content
+      const matchSearch = !q || 
+        course.title?.toLowerCase().includes(q.toLowerCase()) ||
+        course.description?.toLowerCase().includes(q.toLowerCase()) ||
+        course.category?.toLowerCase().includes(q.toLowerCase()) ||
+        course.sub_category?.toLowerCase().includes(q.toLowerCase());
+      
+      // Filter by category (exact match or contains)
+      const matchCategory = !category || 
+        course.category?.toLowerCase() === category.toLowerCase() ||
+        course.category?.toLowerCase().includes(category.toLowerCase());
+      
+      // Filter by sub_category (exact match or contains)
+      const matchSubCategory = !sub_category || 
+        course.sub_category?.toLowerCase() === sub_category.toLowerCase() ||
+        course.sub_category?.toLowerCase().includes(sub_category.toLowerCase());
+      
+      // Filter by level
+      const matchLevel = !level || course.level === level;
+      
+      // Filter by instructor
+      const matchInstructor = !instructor_id || course.instructor_id === instructor_id;
+      
+      // Filter by price range (handle both original price and discount price)
+      const coursePrice = course.discount_price || course.price || 0;
+      const matchPrice = coursePrice >= parseInt(min_price) && coursePrice <= parseInt(max_price);
+      
+      return matchSearch && matchCategory && matchSubCategory && matchLevel && matchInstructor && matchPrice;
+    });
+
+    // Sort courses
+    filtered.sort((a, b) => {
+      switch (sort) {
+        case 'price_asc':
+          const priceA = a.discount_price || a.price || 0;
+          const priceB = b.discount_price || b.price || 0;
+          return priceA - priceB;
+        case 'price_desc':
+          const priceDescA = a.discount_price || a.price || 0;
+          const priceDescB = b.discount_price || b.price || 0;
+          return priceDescB - priceDescA;
+        case 'rating':
+          return (b.rating || 0) - (a.rating || 0);
+        case 'reviews':
+          return (b.number_of_reviews || 0) - (a.number_of_reviews || 0);
+        case 'newest':
+          return new Date(b.last_updated || 0) - new Date(a.last_updated || 0);
+        case 'duration':
+          return (b.duration_hours || 0) - (a.duration_hours || 0);
+        default:
+          return (a.title || '').localeCompare(b.title || '');
+      }
+    });
+
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedCourses = filtered.slice(startIndex, endIndex);
+
+    // Add instructor info and additional data to each course
+    const coursesWithDetails = paginatedCourses.map(course => {
+      const instructor = instructors.find(i => i.id === course.instructor_id);
+      const courseReviewCount = reviews.filter(r => r.course_id === course.id).length;
+      const actualPrice = course.discount_price || course.price || 0;
+      
+      return {
+        ...course,
+        instructor: instructor ? {
+          id: instructor.id,
+          fullname: instructor.fullname,
+          avatar: instructor.avatar
+        } : null,
+        actual_review_count: courseReviewCount,
+        effective_price: actualPrice,
+        has_discount: course.discount_price && course.discount_price < course.price
+      };
+    });
+
+    // Generate filter statistics
+    const stats = {
+      total_found: filtered.length,
+      price_range: {
+        min: Math.min(...filtered.map(c => c.discount_price || c.price || 0)),
+        max: Math.max(...filtered.map(c => c.discount_price || c.price || 0))
+      },
+      categories: [...new Set(filtered.map(c => c.category).filter(Boolean))],
+      sub_categories: [...new Set(filtered.map(c => c.sub_category).filter(Boolean))],
+      levels: [...new Set(filtered.map(c => c.level).filter(Boolean))],
+      instructors: [...new Set(filtered.map(c => c.instructor_id).filter(Boolean))].length
+    };
+
+    res.json({
+      courses: coursesWithDetails,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: Math.ceil(filtered.length / limit),
+        total_courses: filtered.length,
+        per_page: parseInt(limit),
+        has_next: parseInt(page) < Math.ceil(filtered.length / limit),
+        has_prev: parseInt(page) > 1
+      },
+      filters_applied: {
+        search_query: q,
+        category: category,
+        sub_category: sub_category,
+        price_range: {
+          min: parseInt(min_price),
+          max: parseInt(max_price)
+        },
+        level: level,
+        instructor_id: instructor_id
+      },
+      statistics: stats
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
 });
 
 // Start server

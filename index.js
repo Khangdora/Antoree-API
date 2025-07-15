@@ -488,6 +488,33 @@ app.get('/api/filter', (req, res) => {
   }
 });
 
+// Get all courses (simplified data) - MUST BE BEFORE /:id route
+app.get('/api/courses/all', (req, res) => {
+  try {
+    const simplifiedCourses = courses.map(course => ({
+      id: course.id,
+      title: course.title,
+      category: course.category,
+      price: course.price,
+      discount_price: course.discount_price,
+      description: course.description,
+      duration_hours: course.duration_hours,
+      number_of_lectures: course.number_of_lectures,
+      rating: course.rating,
+      number_of_reviews: course.number_of_reviews,
+      is_bestseller: course.is_bestseller,
+      is_new: course.is_new
+    }));
+
+    res.json({
+      total_courses: simplifiedCourses.length,
+      courses: simplifiedCourses
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

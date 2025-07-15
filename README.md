@@ -20,6 +20,7 @@ A comprehensive REST API server providing mock data for an online learning platf
 ### Courses
 - `GET /api/courses` - Get all courses with filtering and pagination
   - Query parameters: `q`, `category`, `level`, `page`, `limit`, `sort`
+- `GET /api/courses/all` - Get all courses (simplified data with essential fields only)
 - `GET /api/courses/featured` - Get featured/bestseller courses
 - `GET /api/courses/:id` - Get detailed course information
 
@@ -83,6 +84,11 @@ antoree-api/
 ### Get All Courses with Filtering
 ```bash
 curl "http://localhost:3000/api/courses?category=Ngoại ngữ&page=1&limit=5&sort=rating"
+```
+
+### Get All Courses (Simplified)
+```bash
+curl "http://localhost:3000/api/courses/all"
 ```
 
 ### Search Courses
@@ -327,5 +333,31 @@ Get comprehensive price statistics and distribution.
     "1m_2m": 12,
     "over_2m": 3
   }
+}
+```
+
+### All Courses (`/api/courses/all`)
+Get all courses with essential information only. This endpoint returns all courses without pagination, but with simplified data structure for better performance.
+
+**Response:**
+```json
+{
+  "total_courses": 30,
+  "courses": [
+    {
+      "id": "KH001",
+      "title": "Lập Trình Web Front-end với ReactJS & Redux",
+      "category": "Phát triển Web",
+      "price": 1200000,
+      "discount_price": 990000,
+      "description": "Học cách xây dựng các ứng dụng web động...",
+      "duration_hours": 45,
+      "number_of_lectures": 120,
+      "rating": 4.8,
+      "number_of_reviews": 850,
+      "is_bestseller": 1,
+      "is_new": 0
+    }
+  ]
 }
 ```
